@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(psql --version)",
+      "Bash(npx --version)",
+      "Bash(git init *)",
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(npx prisma *)",
+      "Bash(npx tsx *)",
+      "Bash(node --input-type=module)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(taskkill /F /IM node.exe)",
+      "Bash(node --import tsx/esm src/index.ts)",
+      "Bash(curl -s -X POST http://localhost:4000/api/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"admin@pfe.local\",\"password\":\"admin123\"}')"
+    ]
+  }
+}

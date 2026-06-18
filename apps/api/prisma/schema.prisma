@@ -1,0 +1,639 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── RBAC ────────────────────────────────────────────────────────────────────
+
+enum RoleName {
+  ADMIN
+  RH
+  MANAGER
+  EMPLOYE
+}
+
+model Role {
+  id    Int      @id @default(autoincrement())
+  name  RoleName @unique
+  users User[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  fullName     String
+  isActive     Boolean  @default(true)
+  roleId       Int
+  role         Role     @relation(fields: [roleId], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  uploadedDocuments Document[]        @relation("UploadedBy")
+  documentVersions  DocumentVersion[] @relation("VersionUploadedBy")
+  employee          Employee?         @relation("EmployeeUser")
+  approvedLeaves    LeaveRequest[]    @relation("LeaveApprover")
+  managedProjects   Project[]         @relation("ProjectManager")
+  projectMemberships ProjectMember[]  @relation("ProjectMemberships")
+  assignedTasks     Task[]            @relation("TaskAssignee")
+  createdTasks      Task[]            @relation("TaskCreator")
+  comments          Comment[]         @relation("CommentAuthor")
+  supervisedEmployees Employee[]      @relation("SupervisedBy")
+  notifications           Notification[]       @relation("UserNotifications")
+  conversationMemberships ConversationMember[] @relation("UserConversations")
+  sentMessages            Message[]            @relation("SentMessages")
+  createdMeetings         Meeting[]            @relation("MeetingCreator")
+  meetingAttendances      MeetingAttendee[]    @relation("MeetingAttendees")
+  chatbotConversations    ChatbotConversation[]
+  submissions             TaskSubmission[]     @relation("SubmissionAuthor")
+  submissionReviews       SubmissionReview[]   @relation("SubmissionReviewer")
+  taskTransfersFrom       TaskTransfer[]       @relation("TransferFrom")
+  taskTransfersTo         TaskTransfer[]       @relation("TransferTo")
+  uploadedDeliverables    ProjectDeliverable[] @relation("DeliverableUploader")
+  wellnessResponses           WellnessResponse[]   @relation("WellnessUser")
+  supervisionRequestsMade     SupervisionRequest[] @relation("SupReqManager")
+  supervisionRequestsReceived SupervisionRequest[] @relation("SupReqEmployee")
+  supervisionRequestsReviewed SupervisionRequest[] @relation("SupReqReviewer")
+
+  @@index([roleId])
+}
+
+// ─── NOTIFICATIONS ────────────────────────────────────────────────────────────
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([isRead])
+}
+
+// ─── GED ─────────────────────────────────────────────────────────────────────
+
+/// Catégorie de classement des documents.
+model Category {
+  id        Int        @id @default(autoincrement())
+  name      String     @unique
+  color     String     @default("#3B82F6")
+  documents Document[]
+}
+
+/// Tag libre pouvant être attaché à plusieurs documents.
+model Tag {
+  id        Int           @id @default(autoincrement())
+  name      String        @unique
+  color     String        @default("#6B7280")
+  documents DocumentTag[]
+}
+
+/// Table de jointure Document ↔ Tag.
+model DocumentTag {
+  documentId String
+  tagId      Int
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  tag        Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([documentId, tagId])
+}
+
+/// Document principal (métadonnées). Le fichier physique est dans /uploads.
+model Document {
+  id           String    @id @default(cuid())
+  title        String
+  description  String?
+  filename     String    // nom du fichier stocké sur le disque
+  originalName String    // nom original fourni par l'utilisateur
+  mimeType     String
+  size         Int       // octets
+  categoryId   Int?
+  category     Category? @relation(fields: [categoryId], references: [id])
+  uploadedById String
+  uploadedBy   User      @relation("UploadedBy", fields: [uploadedById], references: [id])
+  isArchived   Boolean   @default(false)
+  visibility   String    @default("PUBLIC") // PUBLIC | PRIVATE | RESTRICTED
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  versions     DocumentVersion[]
+  tags         DocumentTag[]
+  aiAnalysis   AiAnalysis?
+  permissions  DocumentPermission[]
+
+  @@index([categoryId])
+  @@index([uploadedById])
+  @@index([isArchived])
+  @@index([visibility])
+}
+
+/// Règle d'accès fine sur un document (rôle, département, projet ou utilisateur spécifique).
+model DocumentPermission {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  type       String   // ROLE | DEPARTMENT | PROJECT | USER
+  value      String   // nom du rôle, departmentId (string), projectId, userId
+  createdAt  DateTime @default(now())
+
+  @@unique([documentId, type, value])
+  @@index([documentId])
+}
+
+// ─── RESSOURCES HUMAINES ────────────────────────────────────────────────────
+
+enum ContractType {
+  CDI
+  CDD
+  STAGE
+  FREELANCE
+  APPRENTISSAGE
+}
+
+enum LeaveType {
+  CONGE_PAYE
+  CONGE_SANS_SOLDE
+  MALADIE
+  MATERNITE
+  PATERNITE
+  AUTRE
+}
+
+enum LeaveStatus {
+  EN_ATTENTE
+  APPROUVE
+  REFUSE
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  RETARD
+  DEMI_JOURNEE
+}
+
+model Department {
+  id        Int        @id @default(autoincrement())
+  name      String     @unique
+  employees Employee[]
+  createdAt DateTime   @default(now())
+}
+
+model Employee {
+  id           String      @id @default(cuid())
+  userId       String      @unique
+  user         User        @relation("EmployeeUser", fields: [userId], references: [id])
+  departmentId Int?
+  department   Department? @relation(fields: [departmentId], references: [id])
+  managerId    String?
+  manager      User?       @relation("SupervisedBy", fields: [managerId], references: [id])
+  position     String
+  phone        String?
+  address      String?
+  birthDate    DateTime?
+  hireDate     DateTime    @default(now())
+  contracts    Contract[]
+  leaveRequests LeaveRequest[]
+  attendances  Attendance[]
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([departmentId])
+  @@index([managerId])
+}
+
+model Contract {
+  id         Int          @id @default(autoincrement())
+  employeeId String
+  employee   Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  type       ContractType
+  startDate  DateTime
+  endDate    DateTime?
+  salary     Float?
+  notes      String?
+  isActive   Boolean      @default(true)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@index([employeeId])
+}
+
+model LeaveRequest {
+  id           Int         @id @default(autoincrement())
+  employeeId   String
+  employee     Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  type         LeaveType
+  startDate    DateTime
+  endDate      DateTime
+  reason       String?
+  status       LeaveStatus @default(EN_ATTENTE)
+  approvedById String?
+  approvedBy   User?       @relation("LeaveApprover", fields: [approvedById], references: [id])
+  approvedAt   DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([employeeId])
+  @@index([status])
+}
+
+model Attendance {
+  id         Int              @id @default(autoincrement())
+  employeeId String
+  employee   Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date       DateTime         @db.Date
+  checkIn    DateTime?
+  checkOut   DateTime?
+  status     AttendanceStatus @default(PRESENT)
+  notes      String?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  @@unique([employeeId, date])
+  @@index([employeeId])
+  @@index([date])
+}
+
+// ─── TÂCHES & PROJETS ────────────────────────────────────────────────────────
+
+enum ProjectStatus {
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  REVIEW
+  DONE
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  name        String
+  description String?
+  status      ProjectStatus @default(ACTIVE)
+  color       String        @default("#3B82F6")
+  dueDate     DateTime?
+  managerId   String
+  manager     User          @relation("ProjectManager", fields: [managerId], references: [id])
+  members     ProjectMember[]
+  tasks       Task[]
+  deliverables ProjectDeliverable[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([managerId])
+}
+
+model ProjectMember {
+  projectId String
+  userId    String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User    @relation("ProjectMemberships", fields: [userId], references: [id])
+  joinedAt  DateTime @default(now())
+
+  @@id([projectId, userId])
+}
+
+model Task {
+  id              String       @id @default(cuid())
+  title           String
+  description     String?
+  status          TaskStatus   @default(TODO)
+  priority        TaskPriority @default(MEDIUM)
+  position        Int          @default(0)
+  dueDate         DateTime?
+  projectId       String?
+  project         Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assigneeId      String?
+  assignee        User?        @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  createdById     String
+  createdBy       User         @relation("TaskCreator", fields: [createdById], references: [id])
+  assigneeNotes   String?
+  assigneeStatus  String?      @default("NOT_STARTED")
+  comments        Comment[]
+  submissions     TaskSubmission[]
+  transfers       TaskTransfer[]
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([projectId])
+  @@index([assigneeId])
+  @@index([status])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  content   String
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation("CommentAuthor", fields: [authorId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([taskId])
+}
+
+/// Résultat d'une analyse IA sur un document.
+model AiAnalysis {
+  id           Int      @id @default(autoincrement())
+  documentId   String   @unique
+  document     Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  provider     String   // "gemini" | "ollama"
+  summary      String   // résumé du document
+  category     String?  // catégorie suggérée par l'IA
+  extractedFields Json? // champs extraits (ex: {"montant":"1500€","date":"01/06/2026"})
+  confidence   Float    @default(0)
+  rawResponse  String?  // réponse brute du LLM (pour debug)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// ─── CHAT ────────────────────────────────────────────────────────────────────
+
+model Conversation {
+  id        String   @id @default(cuid())
+  type      String   // DIRECT | GROUP
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members  ConversationMember[]
+  messages Message[]
+
+  @@index([type])
+}
+
+model ConversationMember {
+  id             String    @id @default(cuid())
+  conversationId String
+  userId         String
+  joinedAt       DateTime  @default(now())
+  lastReadAt     DateTime?
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation("UserConversations", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@index([conversationId])
+}
+
+model Message {
+  id             String    @id @default(cuid())
+  conversationId String
+  senderId       String
+  content        String
+  attachmentUrl  String?
+  attachmentType String?
+  createdAt      DateTime  @default(now())
+  editedAt       DateTime?
+  deletedAt      DateTime?
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation("SentMessages", fields: [senderId], references: [id])
+
+  @@index([conversationId, createdAt])
+  @@index([senderId])
+}
+
+// ─── MEETINGS ────────────────────────────────────────────────────────────────
+
+model Meeting {
+  id           String   @id @default(cuid())
+  title        String
+  description  String?
+  startAt      DateTime
+  endAt        DateTime
+  location     String?
+  createdById  String
+  createdAt    DateTime @default(now())
+
+  createdBy  User              @relation("MeetingCreator", fields: [createdById], references: [id])
+  attendees  MeetingAttendee[]
+
+  @@index([startAt])
+  @@index([createdById])
+}
+
+model MeetingAttendee {
+  id        String @id @default(cuid())
+  meetingId String
+  userId    String
+
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  user    User    @relation("MeetingAttendees", fields: [userId], references: [id])
+
+  @@unique([meetingId, userId])
+}
+
+// ─── CHATBOT ─────────────────────────────────────────────────────────────────
+
+model ChatbotConversation {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages ChatbotMessage[]
+
+  @@index([userId])
+}
+
+model ChatbotMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           String   // 'user' | 'assistant'
+  content        String
+  createdAt      DateTime @default(now())
+
+  conversation ChatbotConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+}
+
+/// Version successive d'un document (historique).
+model DocumentVersion {
+  id           Int      @id @default(autoincrement())
+  documentId   String
+  document     Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  versionNumber Int
+  filename     String
+  originalName String
+  size         Int
+  uploadedById String
+  uploadedBy   User     @relation("VersionUploadedBy", fields: [uploadedById], references: [id])
+  createdAt    DateTime @default(now())
+
+  @@unique([documentId, versionNumber])
+  @@index([documentId])
+}
+
+// ─── WORK SUBMISSIONS ────────────────────────────────────────────────────────
+
+model TaskSubmission {
+  id            String   @id @default(cuid())
+  taskId        String
+  task          Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User     @relation("SubmissionAuthor", fields: [userId], references: [id])
+  comment       String?
+  progressPct   Int?
+  hoursSpent    Float?
+  externalLinks Json?
+  status        String   @default("EN_COURS")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  files   SubmissionFile[]
+  reviews SubmissionReview[]
+
+  @@index([taskId])
+  @@index([userId])
+}
+
+model SubmissionFile {
+  id           String         @id @default(cuid())
+  submissionId String
+  submission   TaskSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  filename     String
+  originalName String
+  mimeType     String
+  size         Int
+  createdAt    DateTime       @default(now())
+
+  @@index([submissionId])
+}
+
+model SubmissionReview {
+  id           String         @id @default(cuid())
+  submissionId String
+  submission   TaskSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  reviewerId   String
+  reviewer     User           @relation("SubmissionReviewer", fields: [reviewerId], references: [id])
+  decision     String
+  comment      String?
+  createdAt    DateTime       @default(now())
+
+  @@index([submissionId])
+  @@index([reviewerId])
+}
+
+model TaskTransfer {
+  id         String   @id @default(cuid())
+  taskId     String
+  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  fromUserId String
+  fromUser   User     @relation("TransferFrom", fields: [fromUserId], references: [id])
+  toUserId   String
+  toUser     User     @relation("TransferTo", fields: [toUserId], references: [id])
+  note       String?
+  createdAt  DateTime @default(now())
+
+  @@index([taskId])
+  @@index([fromUserId])
+  @@index([toUserId])
+}
+
+model ProjectDeliverable {
+  id           String   @id @default(cuid())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title        String
+  description  String?
+  category     String?
+  filename     String
+  originalName String
+  mimeType     String
+  size         Int
+  version      Int      @default(1)
+  uploadedById String
+  uploadedBy   User     @relation("DeliverableUploader", fields: [uploadedById], references: [id])
+  createdAt    DateTime @default(now())
+
+  @@index([projectId])
+  @@index([uploadedById])
+}
+
+// ─── WELLNESS ─────────────────────────────────────────────────────────────────
+
+model WellnessResponse {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation("WellnessUser", fields: [userId], references: [id], onDelete: Cascade)
+  week      DateTime
+  score     Int
+  comment   String?
+  createdAt DateTime @default(now())
+
+  @@unique([userId, week])
+  @@index([userId])
+  @@index([week])
+}
+
+// ─── PROJECT TEMPLATES ────────────────────────────────────────────────────────
+
+model ProjectTemplate {
+  id          String         @id @default(cuid())
+  name        String
+  description String?
+  color       String         @default("#3B82F6")
+  tasks       TemplateTask[]
+  createdAt   DateTime       @default(now())
+}
+
+model TemplateTask {
+  id          String          @id @default(cuid())
+  templateId  String
+  template    ProjectTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  priority    TaskPriority    @default(MEDIUM)
+  dayOffset   Int             @default(0)
+
+  @@index([templateId])
+}
+
+// ─── SUPERVISION REQUESTS ─────────────────────────────────────────────────────
+
+/// Demande d'un manager pour ajouter un employé à son équipe (nécessite approbation Admin/RH).
+model SupervisionRequest {
+  id           String   @id @default(cuid())
+  requesterId  String
+  requester    User     @relation("SupReqManager", fields: [requesterId], references: [id])
+  employeeId   String
+  employee     User     @relation("SupReqEmployee", fields: [employeeId], references: [id])
+  status       String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  note         String?
+  reviewedById String?
+  reviewedBy   User?    @relation("SupReqReviewer", fields: [reviewedById], references: [id])
+  reviewNote   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([requesterId])
+  @@index([employeeId])
+  @@index([status])
+}

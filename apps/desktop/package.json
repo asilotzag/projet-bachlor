@@ -1,0 +1,51 @@
+{
+  "name": "@pfe/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Coque desktop Electron pour la plateforme de gestion d'entreprise",
+  "main": "dist/main.js",
+  "scripts": {
+    "build:main": "tsc -p tsconfig.json",
+    "dev": "npm run build:main && electron .",
+    "start": "electron .",
+    "package": "npm run build:main && electron-builder",
+    "package:win": "npm run build:main && electron-builder --win"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "electron": "^33.3.1",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.3"
+  },
+  "build": {
+    "appId": "ma.pfe.gestion-entreprise",
+    "productName": "Gestion Entreprise",
+    "copyright": "PFE 2026 — Asmae",
+    "files": [
+      "dist/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../web/dist",
+        "to": "web"
+      }
+    ],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "installerHeaderIcon": "",
+      "installerIcon": "",
+      "uninstallerIcon": ""
+    },
+    "directories": {
+      "buildResources": "resources",
+      "output": "dist-electron"
+    }
+  }
+}
