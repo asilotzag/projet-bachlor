@@ -111,9 +111,12 @@ export async function createRequest(req: Request, res: Response): Promise<void> 
   // Check employee exists and is not already on this manager's team
   const employee = await prisma.employee.findUnique({
     where: { userId: employeeId },
-    select: { managerId: true, user: { select: { fullName: true } } },
+    select: { managerId: true, user: { select: { fullName: true, role: { select: { name: true } } } } },
   });
   if (!employee) { res.status(404).json({ message: 'Employé introuvable' }); return; }
+  if (employee.user.role.name !== 'EMPLOYE') {
+    res.status(400).json({ message: 'Seuls les employés peuvent être supervisés par un manager' }); return;
+  }
   if (employee.managerId === userId) {
     res.status(409).json({ message: 'Cet employé est déjà dans votre équipe' }); return;
   }
@@ -222,6 +225,56 @@ export async function rejectRequest(req: Request, res: Response): Promise<void> 
 
 // ── Employés disponibles pour demande ─────────────────────────────────────────
 
+// ── Affectation directe (Admin/RH) ────────────────────────────────────────────
+
+export async function directAssign(req: Request, res: Response): Promise<void> {
+  const { userId } = req.user!;
+  const { managerId, employeeId } = req.body as { managerId: string; employeeId: string };
+
+  if (!managerId || !employeeId) {
+    res.status(400).json({ message: 'managerId et employeeId requis' }); return;
+  }
+
+  // Verify manager exists and has MANAGER role
+  const manager = await prisma.user.findUnique({
+    where: { id: managerId },
+    select: { fullName: true, role: { select: { name: true } } },
+  });
+  if (!manager) { res.status(404).json({ message: 'Manager introuvable' }); return; }
+  if (manager.role.name !== 'MANAGER') {
+    res.status(400).json({ message: 'L\'utilisateur sélectionné n\'est pas un manager' }); return;
+  }
+
+  // Verify employee exists and has EMPLOYE role
+  const employee = await prisma.employee.findUnique({
+    where: { userId: employeeId },
+    select: { managerId: true, user: { select: { fullName: true, role: { select: { name: true } } } } },
+  });
+  if (!employee) { res.status(404).json({ message: 'Employé introuvable' }); return; }
+  if (employee.user.role.name !== 'EMPLOYE') {
+    res.status(400).json({ message: 'Seuls les employés peuvent être affectés à une équipe' }); return;
+  }
+  if (employee.managerId === managerId) {
+    res.status(409).json({ message: 'Cet employé est déjà dans l\'équipe de ce manager' }); return;
+  }
+
+  await prisma.employee.update({
+    where: { userId: employeeId },
+    data: { managerId },
+  });
+
+  // Notify the manager
+  void createNotification(
+    managerId,
+    'SUPERVISION_APPROVED',
+    'Nouveau membre dans votre équipe',
+    `${employee.user.fullName} a été affecté(e) à votre équipe par l'administration`,
+    '/team',
+  );
+
+  res.json({ message: `${employee.user.fullName} affecté(e) à l'équipe de ${manager.fullName}` });
+}
+
 export async function getAvailableEmployees(req: Request, res: Response): Promise<void> {
   const { userId } = req.user!;
 
@@ -231,7 +284,7 @@ export async function getAvailableEmployees(req: Request, res: Response): Promis
         { managerId: null },
         { managerId: { not: userId } },
       ],
-      user: { isActive: true },
+      user: { isActive: true, role: { name: 'EMPLOYE' } },
     },
     include: {
       user: { select: { id: true, fullName: true, email: true } },

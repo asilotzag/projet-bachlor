@@ -7,6 +7,7 @@ import {
   createRequest,
   approveRequest,
   rejectRequest,
+  directAssign,
   getAvailableEmployees,
   removeFromTeam,
 } from './supervision.controller.js';
@@ -21,6 +22,7 @@ router.get('/available-employees', requireRole('MANAGER'), getAvailableEmployees
 router.post('/requests',           requireRole('MANAGER'), createRequest);
 router.put('/requests/:id/approve', requireRole('ADMIN', 'RH'), approveRequest);
 router.put('/requests/:id/reject',  requireRole('ADMIN', 'RH'), rejectRequest);
+router.post('/assign',              requireRole('ADMIN', 'RH'), directAssign);
 router.delete('/remove/:employeeId', requireRole('ADMIN', 'RH'), removeFromTeam);
 
 export default router;

@@ -32,8 +32,6 @@ interface Attendance {
   id: number; date: string; status: string; checkIn?: string; checkOut?: string;
   employee: { user: { fullName: string } };
 }
-interface UserRow { id: string; fullName: string; email: string }
-
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const CONTRACT_LABELS: Record<string, string> = {
@@ -131,29 +129,13 @@ function EmployeesTab({ isHRAdmin }: { isHRAdmin: boolean }) {
     queryKey: ['departments'],
     queryFn: async () => (await api.get('/api/hr/departments')).data,
   });
-  const { data: users = [] } = useQuery<UserRow[]>({
-    queryKey: ['users'],
-    queryFn: async () => (await api.get('/api/users')).data,
-    enabled: isHRAdmin,
-  });
-
-  const usersWithoutProfile = users.filter(
-    (u) => !employees.find((e) => e.user.id === u.id),
-  );
-
-  const createMut = useMutation({
-    mutationFn: (data: any) => api.post('/api/hr/employees', data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employees'] }); toast.success('Profil créé'); setShowForm(false); },
-    onError: (e: any) => toast.error(e.response?.data?.message ?? 'Erreur'),
-  });
-
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-5">
         <p className="text-sm text-slate-500">{employees.length} employé{employees.length !== 1 ? 's' : ''}</p>
         {isHRAdmin && (
           <button onClick={() => setShowForm(true)} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition">
-            <Plus size={15} /> Ajouter un profil
+            <Plus size={15} /> Créer un compte
           </button>
         )}
       </div>
@@ -208,11 +190,9 @@ function EmployeesTab({ isHRAdmin }: { isHRAdmin: boolean }) {
       {showForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <EmployeeCreateForm
-            users={usersWithoutProfile}
             departments={departments}
             onClose={() => setShowForm(false)}
-            onSubmit={(data) => createMut.mutate(data)}
-            isPending={createMut.isPending}
+            onSuccess={() => qc.invalidateQueries({ queryKey: ['employees'] })}
           />
         </div>
       )}
@@ -358,53 +338,145 @@ function EmployeeDetailModal({ employee, departments, isHRAdmin, onClose, onUpda
   );
 }
 
-// ─── Formulaire création employé ──────────────────────────────────────────────
+// ─── Formulaire création employé (compte + profil) ────────────────────────────
 
-function EmployeeCreateForm({ users, departments, onClose, onSubmit, isPending }: {
-  users: UserRow[]; departments: Department[];
-  onClose: () => void; onSubmit: (data: any) => void; isPending: boolean;
+function EmployeeCreateForm({ departments, onClose, onSuccess }: {
+  departments: Department[];
+  onClose: () => void;
+  onSuccess: () => void;
 }) {
-  const [form, setForm] = useState({ userId: '', position: '', departmentId: '', phone: '', hireDate: '' });
+  const [form, setForm] = useState({
+    fullName: '', email: '', password: '', role: 'EMPLOYE',
+    position: '', departmentId: '', phone: '', hireDate: '',
+  });
+  const [showPassword, setShowPassword] = useState(false);
+
+  const createMut = useMutation({
+    mutationFn: (data: any) => api.post('/api/hr/employees/full', data).then((r) => r.data),
+    onSuccess: () => {
+      toast.success('Compte et profil créés avec succès');
+      onSuccess();
+      onClose();
+    },
+    onError: (e: any) => toast.error(e.response?.data?.message ?? 'Erreur lors de la création'),
+  });
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    createMut.mutate({
+      fullName: form.fullName,
+      email: form.email,
+      password: form.password,
+      role: form.role,
+      position: form.position,
+      departmentId: form.departmentId ? Number(form.departmentId) : null,
+      phone: form.phone || null,
+      hireDate: form.hireDate ? new Date(form.hireDate).toISOString() : undefined,
+    });
+  }
+
+  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
   return (
-    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-7">
-      <div className="flex items-center justify-between mb-5">
-        <h2 className="text-lg font-bold text-slate-800">Ajouter un profil employé</h2>
+    <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-7 max-h-[90vh] overflow-y-auto">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-lg font-bold text-slate-800">Créer un compte</h2>
+          <p className="text-xs text-slate-400 mt-0.5">Le compte sera actif immédiatement</p>
+        </div>
         <button onClick={onClose}><X size={20} className="text-slate-400" /></button>
       </div>
-      <form onSubmit={(e) => { e.preventDefault(); onSubmit({ ...form, departmentId: form.departmentId ? Number(form.departmentId) : null, hireDate: form.hireDate ? new Date(form.hireDate).toISOString() : undefined }); }} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1.5">Utilisateur *</label>
-          <select className="input" required value={form.userId} onChange={(e) => setForm({ ...form, userId: e.target.value })}>
-            <option value="">— Sélectionner —</option>
-            {users.map((u) => <option key={u.id} value={u.id}>{u.fullName} ({u.email})</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1.5">Poste *</label>
-          <input className="input" required value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
+
+      <form onSubmit={handleSubmit} className="space-y-5">
+        {/* Section compte */}
+        <div className="bg-slate-50 rounded-xl p-4 space-y-3">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Informations du compte</p>
+
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">Département</label>
-            <select className="input" value={form.departmentId} onChange={(e) => setForm({ ...form, departmentId: e.target.value })}>
-              <option value="">— Aucun —</option>
-              {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Nom complet <span className="text-red-500">*</span></label>
+            <input className="input" required placeholder="Ex: Sara Chraibi" value={form.fullName} onChange={(e) => set('fullName', e.target.value)} />
           </div>
+
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">Date embauche</label>
-            <input type="date" className="input" value={form.hireDate} onChange={(e) => setForm({ ...form, hireDate: e.target.value })} />
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Email <span className="text-red-500">*</span></label>
+            <input className="input" type="email" required placeholder="sara@entreprise.com" value={form.email} onChange={(e) => set('email', e.target.value)} />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Mot de passe <span className="text-red-500">*</span></label>
+            <div className="relative">
+              <input
+                className="input pr-10"
+                type={showPassword ? 'text' : 'password'}
+                required minLength={6}
+                placeholder="Min. 6 caractères"
+                value={form.password}
+                onChange={(e) => set('password', e.target.value)}
+              />
+              <button type="button" onClick={() => setShowPassword((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs">
+                {showPassword ? 'Masquer' : 'Afficher'}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Rôle <span className="text-red-500">*</span></label>
+            <div className="grid grid-cols-3 gap-2">
+              {(['EMPLOYE', 'MANAGER', 'RH'] as const).map((r) => (
+                <button
+                  key={r} type="button"
+                  onClick={() => set('role', r)}
+                  className={`py-2 rounded-lg border text-sm font-medium transition ${
+                    form.role === r
+                      ? r === 'EMPLOYE' ? 'bg-emerald-600 border-emerald-600 text-white'
+                        : r === 'MANAGER' ? 'bg-amber-500 border-amber-500 text-white'
+                        : 'bg-blue-600 border-blue-600 text-white'
+                      : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  {r === 'EMPLOYE' ? 'Employé' : r === 'MANAGER' ? 'Manager' : 'RH'}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1.5">Téléphone</label>
-          <input className="input" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+
+        {/* Section profil */}
+        <div className="bg-slate-50 rounded-xl p-4 space-y-3">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Profil professionnel</p>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Poste <span className="text-red-500">*</span></label>
+            <input className="input" required placeholder="Ex: Développeur Full Stack" value={form.position} onChange={(e) => set('position', e.target.value)} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">Département</label>
+              <select className="input" value={form.departmentId} onChange={(e) => set('departmentId', e.target.value)}>
+                <option value="">— Aucun —</option>
+                {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">Date d'embauche</label>
+              <input type="date" className="input" value={form.hireDate} onChange={(e) => set('hireDate', e.target.value)} />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Téléphone</label>
+            <input className="input" placeholder="+212 6XX XXX XXX" value={form.phone} onChange={(e) => set('phone', e.target.value)} />
+          </div>
         </div>
-        <div className="flex gap-3 pt-2">
-          <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-lg border border-slate-300 text-sm text-slate-600">Annuler</button>
-          <button type="submit" disabled={isPending} className="flex-1 flex items-center justify-center gap-2 bg-blue-600 text-white text-sm font-medium py-2.5 rounded-lg disabled:opacity-60">
-            {isPending && <Loader2 size={14} className="animate-spin" />} Créer
+
+        <div className="flex gap-3">
+          <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-50 transition">
+            Annuler
+          </button>
+          <button type="submit" disabled={createMut.isPending} className="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2.5 rounded-lg disabled:opacity-60 transition">
+            {createMut.isPending && <Loader2 size={14} className="animate-spin" />}
+            {createMut.isPending ? 'Création…' : 'Créer le compte'}
           </button>
         </div>
       </form>

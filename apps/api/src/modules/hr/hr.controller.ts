@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
+import bcrypt from 'bcrypt';
 import { prisma } from '../../prisma.js';
 import * as notifSvc from '../../services/notificationService.js';
 
@@ -138,6 +139,51 @@ export async function createEmployee(req: Request, res: Response): Promise<void>
     data: parsed.data,
     include: employeeInclude,
   });
+  res.status(201).json(employee);
+}
+
+const CreateFullSchema = z.object({
+  fullName:     z.string().min(2).max(100),
+  email:        z.string().email(),
+  password:     z.string().min(6),
+  role:         z.enum(['EMPLOYE', 'MANAGER', 'RH']),
+  position:     z.string().min(1).max(100),
+  departmentId: z.number().optional().nullable(),
+  phone:        z.string().optional().nullable(),
+  hireDate:     z.string().datetime().optional(),
+});
+
+export async function createFullEmployee(req: Request, res: Response): Promise<void> {
+  const parsed = CreateFullSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ message: 'Données invalides', errors: parsed.error.flatten() }); return;
+  }
+  const { fullName, email, password, role, position, departmentId, phone, hireDate } = parsed.data;
+
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing) { res.status(409).json({ message: 'Un compte avec cet email existe déjà' }); return; }
+
+  const roleRecord = await prisma.role.findFirst({ where: { name: role } });
+  if (!roleRecord) { res.status(400).json({ message: 'Rôle invalide' }); return; }
+
+  const passwordHash = await bcrypt.hash(password, 12);
+
+  const employee = await prisma.$transaction(async (tx) => {
+    const user = await tx.user.create({
+      data: { fullName, email, passwordHash, roleId: roleRecord.id },
+    });
+    return tx.employee.create({
+      data: {
+        userId: user.id,
+        position,
+        departmentId: departmentId ?? null,
+        phone: phone ?? null,
+        hireDate: hireDate ? new Date(hireDate) : new Date(),
+      },
+      include: employeeInclude,
+    });
+  });
+
   res.status(201).json(employee);
 }
 
@@ -442,7 +488,10 @@ export async function getOrgChart(_req: Request, res: Response): Promise<void> {
     role: u.role.name,
     position: u.employee?.position ?? u.role.name,
     department: u.employee?.department?.name ?? null,
-    managerId: u.employee?.managerId ?? null,
+    // ADMIN and RH are never subordinate to a manager
+    managerId: (u.role.name === 'ADMIN' || u.role.name === 'RH')
+      ? null
+      : (u.employee?.managerId ?? null),
   }));
 
   res.json(nodes);

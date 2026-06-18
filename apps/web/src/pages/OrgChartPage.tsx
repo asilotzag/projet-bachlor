@@ -105,9 +105,22 @@ export default function OrgChartPage() {
 
   const filtered = filterDept ? nodes.filter((n) => n.department === filterDept) : nodes;
 
-  // Find roots: nodes with no manager, or manager not in current list
   const filteredIds = new Set(filtered.map((n) => n.id));
-  const roots = filtered.filter((n) => !n.managerId || !filteredIds.has(n.managerId));
+
+  // Admin is the single root; all other nodes without a managerId become virtual children of Admin
+  const adminNode = filtered.find((n) => n.role === 'ADMIN');
+  const virtualAdminId = adminNode?.id ?? '__admin__';
+
+  const augmented = filtered.map((n) => {
+    // Already has a real manager in the list → keep as-is
+    if (n.managerId && filteredIds.has(n.managerId)) return n;
+    // Admin itself → root (no parent)
+    if (n.role === 'ADMIN') return { ...n, managerId: null };
+    // Everyone else with no manager → child of Admin
+    return { ...n, managerId: virtualAdminId };
+  });
+
+  const roots = augmented.filter((n) => !n.managerId);
 
   return (
     <div className="p-6 space-y-6">
@@ -155,7 +168,7 @@ export default function OrgChartPage() {
         ) : (
           <div className="flex gap-12 justify-center min-w-max pb-4">
             {roots.map((root) => (
-              <OrgTreeNode key={root.id} node={root} allNodes={filtered} />
+              <OrgTreeNode key={root.id} node={root} allNodes={augmented} />
             ))}
           </div>
         )}

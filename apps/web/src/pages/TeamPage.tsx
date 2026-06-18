@@ -76,6 +76,7 @@ export default function TeamPage() {
 
   const [tab, setTab] = useState<'team' | 'requests'>(isManager ? 'team' : 'requests');
   const [showRequestModal, setShowRequestModal] = useState(false);
+  const [showAssignModal, setShowAssignModal] = useState(false);
   const [reviewModal, setReviewModal] = useState<{ request: SupervisionRequest; action: 'approve' | 'reject' } | null>(null);
   const [expandedMember, setExpandedMember] = useState<string | null>(null);
 
@@ -98,14 +99,24 @@ export default function TeamPage() {
             </p>
           </div>
         </div>
-        {isManager && (
-          <button
-            onClick={() => setShowRequestModal(true)}
-            className="flex items-center gap-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
-          >
-            <UserPlus size={16} /> Demander une affectation
-          </button>
-        )}
+        <div className="flex gap-2">
+          {isManager && (
+            <button
+              onClick={() => setShowRequestModal(true)}
+              className="flex items-center gap-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
+            >
+              <UserPlus size={16} /> Demander une affectation
+            </button>
+          )}
+          {isAdminRH && (
+            <button
+              onClick={() => setShowAssignModal(true)}
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
+            >
+              <UserPlus size={16} /> Affecter directement
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Tab bar */}
@@ -115,8 +126,13 @@ export default function TeamPage() {
             <Users size={15} /> Mon équipe
           </TabBtn>
         )}
+        {isAdminRH && (
+          <TabBtn active={tab === 'team'} onClick={() => setTab('team')}>
+            <Users size={15} /> Équipes
+          </TabBtn>
+        )}
         <TabBtn active={tab === 'requests'} onClick={() => setTab('requests')}>
-          <Clock size={15} /> {isAdminRH ? 'Toutes les demandes' : 'Mes demandes'}
+          <Clock size={15} /> {isAdminRH ? 'Demandes en attente' : 'Mes demandes'}
         </TabBtn>
       </div>
 
@@ -139,6 +155,9 @@ export default function TeamPage() {
       {/* Modals */}
       {showRequestModal && (
         <NewRequestModal onClose={() => setShowRequestModal(false)} />
+      )}
+      {showAssignModal && (
+        <DirectAssignModal onClose={() => setShowAssignModal(false)} />
       )}
       {reviewModal && (
         <ReviewModal
@@ -175,11 +194,26 @@ function TeamTab({
   isAdminRH: boolean;
 }) {
   const qc = useQueryClient();
+  const [selectedManagerId, setSelectedManagerId] = useState(isAdminRH ? '' : managerId);
+
+  const { data: managers = [] } = useQuery<Array<{ id: string; fullName: string }>>({
+    queryKey: ['managers-list'],
+    queryFn: () => api.get('/api/hr/orgchart').then((r) =>
+      (r.data as Array<{ id: string; name: string; role: string }>)
+        .filter((u) => u.role === 'MANAGER')
+        .map((u) => ({ id: u.id, fullName: u.name }))
+    ),
+    enabled: isAdminRH,
+    staleTime: 120_000,
+  });
+
+  const targetId = isAdminRH ? selectedManagerId : managerId;
 
   const { data: team = [], isLoading } = useQuery<TeamMember[]>({
-    queryKey: ['my-team', managerId],
-    queryFn: () => api.get('/api/supervision/my-team').then((r) => r.data),
+    queryKey: ['my-team', targetId],
+    queryFn: () => api.get(`/api/supervision/my-team?managerId=${targetId}`).then((r) => r.data),
     staleTime: 60_000,
+    enabled: !!targetId,
   });
 
   const removeMut = useMutation({
@@ -191,20 +225,57 @@ function TeamTab({
     onError: (e: any) => toast.error(e.response?.data?.message ?? 'Erreur'),
   });
 
+  if (isAdminRH && !selectedManagerId) {
+    return (
+      <div className="space-y-4">
+        <div className="bg-white rounded-2xl border border-slate-200 p-6">
+          <p className="text-sm font-medium text-slate-700 mb-3">Sélectionnez un manager pour voir son équipe :</p>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {managers.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => setSelectedManagerId(m.id)}
+                className="flex items-center gap-3 p-3 bg-slate-50 hover:bg-violet-50 border border-slate-200 hover:border-violet-300 rounded-xl transition text-left"
+              >
+                <div className="w-9 h-9 rounded-full bg-violet-100 text-violet-700 font-bold text-sm flex items-center justify-center shrink-0">
+                  {m.fullName.slice(0, 2).toUpperCase()}
+                </div>
+                <span className="text-sm font-medium text-slate-700 truncate">{m.fullName}</span>
+              </button>
+            ))}
+            {managers.length === 0 && <p className="text-sm text-slate-400 italic col-span-3">Aucun manager trouvé.</p>}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (isLoading) return <LoadingSpinner />;
 
   if (team.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-3">
-        <Users size={48} className="text-slate-200" />
-        <p className="text-base font-medium text-slate-500">Aucun membre dans cette équipe</p>
-        <p className="text-sm">Faites une demande d'affectation pour ajouter des employés.</p>
+      <div className="space-y-4">
+        {isAdminRH && (
+          <button onClick={() => setSelectedManagerId('')} className="text-xs text-violet-600 hover:underline flex items-center gap-1">
+            ← Changer de manager
+          </button>
+        )}
+        <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-3">
+          <Users size={48} className="text-slate-200" />
+          <p className="text-base font-medium text-slate-500">Aucun membre dans cette équipe</p>
+          <p className="text-sm">{isAdminRH ? 'Utilisez "Affecter directement" pour ajouter des employés.' : 'Faites une demande d\'affectation pour ajouter des employés.'}</p>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
+      {isAdminRH && (
+        <button onClick={() => setSelectedManagerId('')} className="text-xs text-violet-600 hover:underline flex items-center gap-1 mb-1">
+          ← Changer de manager
+        </button>
+      )}
       <div className="flex items-center justify-between text-sm text-slate-500 mb-2">
         <span>{team.length} membre{team.length !== 1 ? 's' : ''} supervisé{team.length !== 1 ? 's' : ''}</span>
       </div>
@@ -741,6 +812,124 @@ function ReviewModal({ request, action, onClose }: {
             {isApprove ? 'Confirmer l\'approbation' : 'Confirmer le refus'}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Modal Affectation directe (Admin/RH) ─────────────────────────────────────
+
+function DirectAssignModal({ onClose }: { onClose: () => void }) {
+  const qc = useQueryClient();
+  const [managerId, setManagerId] = useState('');
+  const [employeeUserId, setEmployeeUserId] = useState('');
+
+  const { data: orgNodes = [] } = useQuery<Array<{ id: string; name: string; role: string }>>({
+    queryKey: ['orgchart'],
+    queryFn: () => api.get('/api/hr/orgchart').then((r) => r.data),
+    staleTime: 120_000,
+  });
+
+  const { data: allEmployees = [] } = useQuery<Array<{
+    id: string; userId: string; position: string; managerId: string | null;
+    user: { id: string; fullName: string };
+    department: { name: string } | null;
+  }>>({
+    queryKey: ['hr-employees-all'],
+    queryFn: () => api.get('/api/hr/employees').then((r) => r.data),
+    staleTime: 60_000,
+  });
+
+  const managers = orgNodes.filter((u) => u.role === 'MANAGER');
+  const availableEmployees = allEmployees.filter((e) => e.managerId !== managerId);
+
+  const assignMut = useMutation({
+    mutationFn: () => api.post('/api/supervision/assign', { managerId, employeeId: employeeUserId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['my-team'] });
+      qc.invalidateQueries({ queryKey: ['supervision-requests'] });
+      toast.success('Employé affecté avec succès');
+      onClose();
+    },
+    onError: (e: any) => toast.error(e.response?.data?.message ?? 'Erreur'),
+  });
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!managerId || !employeeUserId) { toast.error('Sélectionnez un manager et un employé'); return; }
+    assignMut.mutate();
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-7">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-lg font-bold text-slate-800">Affectation directe</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Affecter un employé à l'équipe d'un manager</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">
+              Manager <span className="text-red-500">*</span>
+            </label>
+            <select
+              className="input"
+              value={managerId}
+              required
+              onChange={(e) => { setManagerId(e.target.value); setEmployeeUserId(''); }}
+            >
+              <option value="">— Sélectionner un manager —</option>
+              {managers.map((m) => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">
+              Employé à affecter <span className="text-red-500">*</span>
+            </label>
+            <select
+              className="input"
+              value={employeeUserId}
+              required
+              disabled={!managerId}
+              onChange={(e) => setEmployeeUserId(e.target.value)}
+            >
+              <option value="">— Sélectionner un employé —</option>
+              {availableEmployees.map((emp) => (
+                <option key={emp.id} value={emp.user.id}>
+                  {emp.user.fullName}{emp.department ? ` · ${emp.department.name}` : ''}{emp.managerId ? ' (déjà supervisé)' : ''}
+                </option>
+              ))}
+            </select>
+            {managerId && availableEmployees.length === 0 && (
+              <p className="text-xs text-slate-400 mt-1 italic">Tous les employés sont déjà dans cette équipe.</p>
+            )}
+          </div>
+
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-xs text-emerald-700">
+            Cette affectation est immédiate et ne nécessite pas d'approbation.
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-50 transition">
+              Annuler
+            </button>
+            <button
+              type="submit"
+              disabled={assignMut.isPending || !managerId || !employeeUserId}
+              className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-medium py-2.5 rounded-lg transition"
+            >
+              {assignMut.isPending ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />}
+              {assignMut.isPending ? 'Affectation…' : 'Affecter'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

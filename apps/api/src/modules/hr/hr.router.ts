@@ -4,7 +4,7 @@ import {
   // Départements
   listDepartments, createDepartment, updateDepartment, deleteDepartment,
   // Employés
-  listEmployees, getEmployee, createEmployee, updateEmployee,
+  listEmployees, getEmployee, createEmployee, createFullEmployee, updateEmployee,
   // Contrats
   listContracts, createContract, updateContract,
   // Congés
@@ -27,7 +27,8 @@ router.delete('/departments/:id', requireRole('ADMIN'), deleteDepartment);
 // ─── Employés ──────────────────────────────────────────────────────────────
 router.get('/employees',      listEmployees);
 router.get('/employees/:id',  getEmployee);
-router.post('/employees',     requireRole('ADMIN', 'RH'), createEmployee);
+router.post('/employees',          requireRole('ADMIN', 'RH'), createEmployee);
+router.post('/employees/full',     requireRole('ADMIN', 'RH'), createFullEmployee);
 router.put('/employees/:id',  requireRole('ADMIN', 'RH'), updateEmployee);
 
 // ─── Contrats ──────────────────────────────────────────────────────────────
