@@ -25,6 +25,7 @@ import journalRouter       from './modules/journal/journal.router.js';
 import wellnessRouter      from './modules/wellness/wellness.router.js';
 import templatesRouter     from './modules/templates/templates.router.js';
 import supervisionRouter   from './modules/supervision/supervision.router.js';
+import reportsRouter       from './modules/reports/reports.router.js';
 
 export const app = express();
 
@@ -59,6 +60,7 @@ app.use('/api',               journalRouter);
 app.use('/api/wellness',      wellnessRouter);
 app.use('/api/templates',     templatesRouter);
 app.use('/api/supervision',   supervisionRouter);
+app.use('/api/reports',      reportsRouter);
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   console.error(err.message);

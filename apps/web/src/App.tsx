@@ -18,6 +18,7 @@ import CalendarPage    from './pages/CalendarPage';
 import WorkJournalPage from './pages/WorkJournalPage';
 import OrgChartPage from './pages/OrgChartPage';
 import TeamPage from './pages/TeamPage';
+import ReportsPage from './pages/ReportsPage';
 
 export default function App() {
   return (
@@ -34,7 +35,7 @@ export default function App() {
             <Route path="/documents" element={<GEDPage />} />
             <Route path="/tasks"     element={<TasksPage />} />
             <Route path="/hr"        element={<HRPage />} />
-            <Route path="/reports"   element={<PlaceholderPage title="Rapports et Statistiques" />} />
+            <Route path="/reports"   element={<ReportsPage />} />
             <Route path="/users"      element={<UsersPage />} />
             <Route path="/users/:id"  element={<UserDetailPage />} />
             <Route path="/profile"    element={<ProfilePage />} />
